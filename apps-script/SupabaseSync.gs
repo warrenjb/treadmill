@@ -30,7 +30,10 @@ function syncSessionToSupabase(person, startTime, endTime, durationS, distanceMi
 /** Push every row in every person tab. Run manually, or on a daily time trigger as a safety net. */
 function syncAllSheetRows() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const rows = [];
+  // Keyed by workout ID: if the ESP32 logged the same workout twice (same person +
+  // start time), the later sheet row wins. Supabase rejects a batch that contains
+  // the same workout twice, so this also keeps the nightly sync from failing.
+  const byId = {};
   PERSON_TABS.forEach(function (person) {
     const sheet = ss.getSheetByName(person);
     if (!sheet || sheet.getLastRow() < 2) return;
@@ -38,9 +41,12 @@ function syncAllSheetRows() {
     const values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getDisplayValues();
     values.forEach(function (v) {
       if (!v[1]) return;
-      rows.push(buildRow_(person, v[1], v[2], v[3], v[4], v[5], 'sheets_backfill'));
+      const row = buildRow_(person, v[1], v[2], v[3], v[4], v[5], null);
+      delete row.source; // keep whatever source the row already has in Supabase
+      byId[row.client_id] = row;
     });
   });
+  const rows = Object.keys(byId).map(function (k) { return byId[k]; });
   for (let i = 0; i < rows.length; i += 200) upsertRows_(rows.slice(i, i + 200));
   console.log('Synced ' + rows.length + ' rows to Supabase');
 }
