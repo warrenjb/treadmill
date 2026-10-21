@@ -1,0 +1,449 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Treadmill Dashboard</title>
+<meta name="description" content="Workout history from the homemade Sole F80 treadmill tracker.">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f7f9; --surface-1: #ffffff; --text-primary: #16181d;
+    --text-secondary: #52514e; --muted: #6b7280; --line: #e5e7eb; --grid: #eef0f3;
+    --series-1: #2a78d6; --series-2: #eb6834; --critical: #dc2626; --good: #16a34a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --bg: #0f1115; --surface-1: #181b22; --text-primary: #f0efec;
+      --text-secondary: #c3c2b7; --muted: #9ca3af; --line: #2a2f3a; --grid: #232833;
+      --series-1: #3987e5; --series-2: #d95926; --critical: #f87171; --good: #22c55e;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0f1115; --surface-1: #181b22; --text-primary: #f0efec;
+    --text-secondary: #c3c2b7; --muted: #9ca3af; --line: #2a2f3a; --grid: #232833;
+    --series-1: #3987e5; --series-2: #d95926; --critical: #f87171; --good: #22c55e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text-primary);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    padding: 16px; max-width: 960px; margin-inline: auto;
+  }
+  header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  h1 { font-size: 1.2rem; margin: 0; }
+  h2 { font-size: .95rem; margin: 0 0 4px; font-weight: 650; }
+  .sub { color: var(--muted); font-size: .8rem; margin: 0 0 12px; }
+  header nav { display: flex; align-items: center; gap: 12px; font-size: .85rem; }
+  .card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 12px; }
+  button {
+    padding: 8px 12px; font-size: .9rem; font-weight: 600; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface-1); color: var(--text-primary); cursor: pointer;
+  }
+  button.solid { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); }
+
+  .filters { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
+  .filters button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
+  .tile .k { color: var(--text-secondary); font-size: .8rem; }
+  .tile .v { font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .v small { font-size: .9rem; font-weight: 600; color: var(--text-secondary); margin-left: 2px; }
+  .tile .n { color: var(--muted); font-size: .75rem; margin-top: 2px; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr; gap: 12px; }
+  @media (min-width: 760px) { .grid2 { grid-template-columns: 1fr 1fr; } }
+  .grid2 .card { margin-bottom: 0; }
+  .chart-box { position: relative; height: 240px; }
+  select {
+    padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--surface-1); color: var(--text-primary); font-size: .85rem; max-width: 100%;
+  }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 8px 6px; border-top: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--text-secondary); font-weight: 600; font-size: .8rem; border-top: 0; }
+  td.num, th.num { text-align: right; }
+  td .del { padding: 4px 8px; font-size: .75rem; font-weight: 500; color: var(--muted); }
+
+  .signin { max-width: 380px; margin: 40px auto; }
+  .signin form { display: grid; gap: 8px; }
+  .signin input {
+    width: 100%; padding: 12px; font-size: 1rem; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text-primary);
+  }
+  .signin button { padding: 12px; font-size: 1rem; }
+  #msg { font-size: .85rem; color: var(--muted); min-height: 1.2em; }
+  #msg.bad { color: var(--critical); }
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; }
+  #app { display: none; }
+  body:not(.everyone) .who-col { display: none; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js"></script>
+</head>
+<body>
+<header>
+  <h1>Treadmill Dashboard</h1>
+  <nav>
+    <span id="who" style="color:var(--muted)"></span>
+    <button id="signOutBtn" style="display:none">Sign out</button>
+  </nav>
+</header>
+
+<div id="signinCard" class="card signin" style="display:none">
+  <h2>Sign in</h2>
+  <p class="sub">Same account you use on the sit-up and foot pod pages.</p>
+  <form id="signinForm">
+    <input type="email" id="email" placeholder="Email" autocomplete="username" required>
+    <input type="password" id="password" placeholder="Password" autocomplete="current-password" required>
+    <button type="submit" class="solid">Sign in</button>
+  </form>
+  <div id="msg"></div>
+</div>
+
+<main id="app">
+  <div class="filters" role="group" aria-label="Date range">
+    <button data-days="7">7 days</button>
+    <button data-days="30" aria-pressed="true">30 days</button>
+    <button data-days="90">90 days</button>
+    <button data-days="0">All time</button>
+    <select id="personPick" aria-label="Person" style="margin-left:auto">
+      <option value="Warren">Warren</option>
+      <option value="Leah">Leah</option>
+      <option value="Evan">Evan</option>
+      <option value="Susan">Susan</option>
+      <option value="">Everyone</option>
+    </select>
+  </div>
+
+  <div class="tiles">
+    <div class="tile"><div class="k">Distance</div><div class="v" id="tDist">–</div><div class="n" id="tDistN"></div></div>
+    <div class="tile"><div class="k">Time on belt</div><div class="v" id="tTime">–</div><div class="n" id="tTimeN"></div></div>
+    <div class="tile"><div class="k">Workouts</div><div class="v" id="tCount">–</div><div class="n" id="tCountN"></div></div>
+    <div class="tile"><div class="k">Avg speed</div><div class="v" id="tSpeed">–</div><div class="n" id="tSpeedN"></div></div>
+    <div class="tile"><div class="k">Longest (all time)</div><div class="v" id="tBest">–</div><div class="n" id="tBestN"></div></div>
+    <div class="tile"><div class="k">Streak</div><div class="v" id="tStreak">–</div><div class="n" id="tStreakN"></div></div>
+  </div>
+
+  <div id="empty" class="card empty" style="display:none">No workouts yet. Finish a session on the treadmill and it will show up here.</div>
+
+  <div id="charts">
+    <div class="card">
+      <h2>Distance per day</h2>
+      <p class="sub">All workouts added together</p>
+      <div class="chart-box"><canvas id="distChart" aria-label="Miles per day bar chart"></canvas></div>
+    </div>
+
+    <div class="grid2" style="margin-bottom:12px">
+      <div class="card">
+        <h2>Minutes per day</h2>
+        <p class="sub">Total time on the belt</p>
+        <div class="chart-box"><canvas id="timeChart" aria-label="Minutes per day bar chart"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Average speed per day</h2>
+        <p class="sub">Distance ÷ time; higher is faster</p>
+        <div class="chart-box"><canvas id="speedChart" aria-label="Average speed per day line chart"></canvas></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Recent workouts</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>When</th><th class="who-col">Who</th><th class="num">Miles</th><th class="num">Time</th>
+            <th class="num">Avg mph</th><th class="num">Pace (min/mi)</th><th></th>
+          </tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <button id="moreBtn" style="margin-top:10px;width:100%;display:none">Show all</button>
+    </div>
+  </div>
+</main>
+
+<script>
+const SUPABASE_URL = 'https://jhunufgtetzqkswtstdv.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_iWbHvHXWYXeVqFmxJNu_vw_zvvmYj_J'; // publishable: safe in a page
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const $ = id => document.getElementById(id);
+let rawRows = [];   // everything loaded, newest first
+let allRows = [];   // rawRows filtered to the chosen person
+let rangeDays = 30;
+const charts = {};
+const PERSON_KEY = 'treadmill_dash_person';
+try {
+  const saved = localStorage.getItem(PERSON_KEY);
+  if (saved !== null && [...$('personPick').options].some(o => o.value === saved)) $('personPick').value = saved;
+} catch (_) {}
+
+function applyPerson() {
+  const p = $('personPick').value;
+  document.body.classList.toggle('everyone', !p);
+  allRows = p ? rawRows.filter(r => r.person === p) : rawRows.slice();
+}
+
+// ---------- helpers ----------
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const dayKey = d => {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+};
+const fmtDay = key => {
+  const [y, m, d] = key.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+const fmtDur = s => {
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return h ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+};
+const fmtHours = s => s >= 3600 ? `${(s / 3600).toFixed(1)}<small>h</small>` : `${Math.round(s / 60)}<small>min</small>`;
+const fmtWhen = iso => new Date(iso).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+const miles = r => Number(r.distance_mi) || 0;
+// Pace as m:ss per mile; blank when there's too little distance to mean anything.
+const fmtPace = (secs, mi) => {
+  if (mi < 0.01) return '–';
+  const p = Math.round(secs / mi);
+  return `${Math.floor(p / 60)}:${String(p % 60).padStart(2, '0')}`;
+};
+const totals = rows => rows.reduce((t, r) => ({ mi: t.mi + miles(r), s: t.s + r.duration_s }), { mi: 0, s: 0 });
+
+function rangeStart() {
+  const start = new Date(); start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (rangeDays - 1));
+  return start;
+}
+function inRange(rows) {
+  if (!rangeDays) return rows;
+  const start = rangeStart();
+  return rows.filter(r => new Date(r.started_at) >= start);
+}
+function dayList(rows) {
+  // Every calendar day in the range, oldest first, so rest days show as gaps.
+  let start;
+  if (rangeDays) start = rangeStart();
+  else {
+    if (!rows.length) return [];
+    start = new Date(rows[rows.length - 1].started_at); start.setHours(0, 0, 0, 0);
+  }
+  const days = [], end = new Date(); end.setHours(0, 0, 0, 0);
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) days.push(dayKey(d));
+  return days;
+}
+
+// ---------- tiles ----------
+function renderTiles(rows) {
+  const label = rangeDays ? `last ${rangeDays} days` : 'all time';
+  const t = totals(rows);
+  $('tDist').innerHTML = `${t.mi.toFixed(t.mi < 10 ? 2 : 1)}<small>mi</small>`;
+  $('tDistN').textContent = label;
+  $('tTime').innerHTML = fmtHours(t.s);
+  $('tTimeN').textContent = label;
+  $('tCount').textContent = rows.length;
+  $('tCountN').textContent = rows.length ? `${(t.mi / rows.length).toFixed(2)} mi per workout` : label;
+
+  if (t.s > 0 && t.mi > 0) {
+    $('tSpeed').innerHTML = `${(t.mi / (t.s / 3600)).toFixed(1)}<small>mph</small>`;
+    $('tSpeedN').textContent = `${fmtPace(t.s, t.mi)} min/mi`;
+  } else { $('tSpeed').textContent = '–'; $('tSpeedN').textContent = ''; }
+
+  const best = allRows.reduce((b, r) => (!b || miles(r) > miles(b) ? r : b), null);
+  $('tBest').innerHTML = best ? `${miles(best).toFixed(2)}<small>mi</small>` : '–';
+  $('tBestN').textContent = best ? fmtWhen(best.started_at) : '';
+
+  // Streak: consecutive days with a workout, ending today (or yesterday if nothing yet today).
+  const days = new Set(allRows.map(r => dayKey(r.started_at)));
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  if (!days.has(dayKey(d))) d.setDate(d.getDate() - 1);
+  let streak = 0;
+  while (days.has(dayKey(d))) { streak++; d.setDate(d.getDate() - 1); }
+  $('tStreak').textContent = streak;
+  $('tStreakN').textContent = streak === 1 ? 'day' : 'days in a row';
+}
+
+// ---------- charts ----------
+function baseOptions(yTitle, opts = {}) {
+  const ink2 = css('--text-secondary');
+  return {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: 'index', intersect: false },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: css('--surface-1'), titleColor: css('--text-primary'),
+        bodyColor: css('--text-primary'), borderColor: css('--line'), borderWidth: 1,
+        padding: 10, displayColors: false, callbacks: opts.tooltip || {}
+      }
+    },
+    scales: {
+      x: { grid: { display: false }, border: { color: css('--line') },
+           ticks: { color: ink2, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
+      y: { beginAtZero: true, grid: { color: css('--grid') }, border: { display: false },
+           ticks: { color: ink2, maxTicksLimit: 6 },
+           title: { display: !!yTitle, text: yTitle, color: ink2 } }
+    }
+  };
+}
+function draw(id, config) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart($(id), config);
+}
+const bars = (data, color) => ({
+  data, backgroundColor: color, borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: 'start',
+  maxBarThickness: 28, categoryPercentage: .85, barPercentage: .9
+});
+
+function renderCharts(rows) {
+  const days = dayList(rows);
+  const byDay = {};
+  for (const r of rows) {
+    const k = dayKey(r.started_at);
+    const b = byDay[k] || (byDay[k] = { mi: 0, s: 0, n: 0 });
+    b.mi += miles(r); b.s += r.duration_s; b.n++;
+  }
+  const labels = days.map(fmtDay);
+  const blue = css('--series-1');
+
+  draw('distChart', {
+    type: 'bar',
+    data: { labels, datasets: [bars(days.map(k => byDay[k] ? +byDay[k].mi.toFixed(2) : 0), blue)] },
+    options: baseOptions('miles', { tooltip: {
+      label: c => { const b = byDay[days[c.dataIndex]]; return b ? `${b.mi.toFixed(2)} mi in ${b.n} workout${b.n > 1 ? 's' : ''}` : 'Rest day'; }
+    } })
+  });
+
+  draw('timeChart', {
+    type: 'bar',
+    data: { labels, datasets: [bars(days.map(k => byDay[k] ? +(byDay[k].s / 60).toFixed(1) : 0), blue)] },
+    options: baseOptions('minutes', { tooltip: {
+      label: c => { const b = byDay[days[c.dataIndex]]; return b ? `${fmtDur(b.s)} on the belt` : 'Rest day'; }
+    } })
+  });
+
+  // Speed only plots days with workouts; spanGaps joins across rest days.
+  draw('speedChart', {
+    type: 'line',
+    data: { labels, datasets: [{
+      data: days.map(k => { const b = byDay[k]; return b && b.s ? +(b.mi / (b.s / 3600)).toFixed(2) : null; }),
+      borderColor: blue, backgroundColor: blue, borderWidth: 2,
+      pointRadius: 4, pointHoverRadius: 6, pointBorderColor: css('--surface-1'), pointBorderWidth: 2,
+      spanGaps: true, tension: 0
+    }] },
+    options: baseOptions('mph', { tooltip: {
+      label: c => { const b = byDay[days[c.dataIndex]]; return `${c.parsed.y.toFixed(1)} mph (${fmtPace(b.s, b.mi)} min/mi)`; }
+    } })
+  });
+}
+
+// ---------- table ----------
+let showAllRows = false;
+function renderTable(rows) {
+  const body = $('rows');
+  body.innerHTML = '';
+  $('moreBtn').style.display = rows.length > 15 ? '' : 'none';
+  $('moreBtn').textContent = showAllRows ? 'Show fewer' : `Show all ${Math.min(rows.length, 500)}`;
+  rows.slice(0, showAllRows ? 500 : 15).forEach(r => {
+    const tr = document.createElement('tr');
+    const mph = r.avg_speed_mph != null ? Number(r.avg_speed_mph)
+      : (r.duration_s ? miles(r) / (r.duration_s / 3600) : null);
+    tr.innerHTML =
+      `<td>${fmtWhen(r.started_at)}</td><td class="who-col"></td>` +
+      `<td class="num"><b>${miles(r).toFixed(2)}</b></td><td class="num">${fmtDur(r.duration_s)}</td>` +
+      `<td class="num">${mph != null ? mph.toFixed(1) : '–'}</td>` +
+      `<td class="num">${fmtPace(r.duration_s, miles(r))}</td>` +
+      `<td class="num"><button class="del" data-id="${r.id}">Delete</button></td>`;
+    tr.querySelector('.who-col').textContent = r.person; // text, not HTML
+    body.appendChild(tr);
+  });
+}
+
+$('rows').addEventListener('click', async e => {
+  const btn = e.target.closest('.del');
+  if (!btn) return;
+  const r = allRows.find(x => String(x.id) === btn.dataset.id);
+  if (!r || !confirm(`Delete ${r.person}'s ${miles(r).toFixed(2)} mi workout from ${fmtWhen(r.started_at)}?\n\nIt stays in the Google Sheet; the nightly sync will add it back unless you delete that row too.`)) return;
+  const { error } = await sb.from('treadmill_sessions').delete().eq('id', r.id);
+  if (error) { alert('Could not delete: ' + error.message); return; }
+  rawRows = rawRows.filter(x => x.id !== r.id);
+  applyPerson();
+  renderAll();
+});
+
+function renderAll() {
+  const rows = inRange(allRows);
+  renderTiles(rows);
+  const none = allRows.length === 0;
+  $('empty').style.display = none ? 'block' : 'none';
+  $('charts').style.display = none ? 'none' : 'block';
+  if (none) return;
+  renderCharts(rows);
+  renderTable(rows);
+}
+
+// ---------- data ----------
+async function loadRows() {
+  const { data, error } = await sb.from('treadmill_sessions')
+    .select('id, person, started_at, ended_at, duration_s, distance_mi, avg_speed_mph')
+    .order('started_at', { ascending: false })
+    .limit(5000);
+  if (error) { $('empty').textContent = 'Could not load workouts: ' + error.message; $('empty').style.display = 'block'; return; }
+  rawRows = data || [];
+  applyPerson();
+  renderAll();
+}
+
+// ---------- filters & theme ----------
+document.querySelectorAll('.filters button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.filters button').forEach(x => x.setAttribute('aria-pressed', 'false'));
+  b.setAttribute('aria-pressed', 'true');
+  rangeDays = Number(b.dataset.days);
+  renderAll();
+}));
+$('personPick').addEventListener('change', () => {
+  try { localStorage.setItem(PERSON_KEY, $('personPick').value); } catch (_) {}
+  applyPerson();
+  renderAll();
+});
+$('moreBtn').addEventListener('click', () => { showAllRows = !showAllRows; renderTable(inRange(allRows)); });
+if (window.matchMedia) {
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => allRows.length && renderAll());
+}
+
+// ---------- auth ----------
+function showSignedIn(user) {
+  $('signinCard').style.display = user ? 'none' : 'block';
+  $('app').style.display = user ? 'block' : 'none';
+  $('signOutBtn').style.display = user ? '' : 'none';
+  $('who').textContent = user ? user.email : '';
+}
+let loadedFor = null;
+sb.auth.onAuthStateChange((_event, session) => {
+  const user = session ? session.user : null;
+  showSignedIn(user);
+  if (user && loadedFor !== user.id) { loadedFor = user.id; loadRows(); }
+  if (!user) { loadedFor = null; rawRows = []; allRows = []; }
+});
+$('signinForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  $('msg').textContent = 'Signing in…'; $('msg').className = '';
+  const { error } = await sb.auth.signInWithPassword({ email: $('email').value.trim(), password: $('password').value });
+  if (error) { $('msg').textContent = error.message; $('msg').className = 'bad'; }
+  else { $('msg').textContent = ''; $('password').value = ''; }
+});
+$('signOutBtn').onclick = () => sb.auth.signOut();
+
+// Refresh when you come back to the tab (e.g. after a workout).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && loadedFor) loadRows();
+});
+</script>
+</body>
+</html>
