@@ -47,7 +47,8 @@
   .filters { display: flex; gap: 6px; margin-bottom: 12px; flex-wrap: wrap; }
   .filters button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); }
 
-  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 12px; }
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 12px; }
+  @media (min-width: 760px) { .tiles { grid-template-columns: repeat(3, 1fr); } }
   .tile { background: var(--surface-1); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
   .tile .k { color: var(--text-secondary); font-size: .8rem; }
   .tile .v { font-size: 1.9rem; font-weight: 800; font-variant-numeric: tabular-nums; margin-top: 2px; }
